@@ -343,11 +343,12 @@
     <div class="hint">感度・キャンセル時間などはコード内の <code>DEFAULT_SETTINGS</code> で全端末共通に管理されています。下は現在の設定値の確認用で、この画面からは変更できません。変更したい場合は管理者にファイルの書き換えを依頼してください。</div>
     <label>転倒判定の感度</label>
     <select id="sensitivity" disabled>
-      <option value="high">高感度（弱い衝撃でも反応）</option>
-      <option value="medium">標準</option>
-      <option value="low">低感度（強い衝撃のみ）</option>
-      <option value="verylow">最低感度（非常に強い衝撃＋完全静止のみ）</option>
+      <option value="high">高感度（弱い衝撃＋静止確認）</option>
+      <option value="medium">標準（中程度の衝撃＋静止確認）</option>
+      <option value="low">低感度（強い衝撃＋静止確認）</option>
+      <option value="verylow">最低感度（非常に強い衝撃＋厳しめの静止確認）</option>
     </select>
+    <div class="hint">どの感度でも、衝撃を検知した後に「体が動いていないか」を確認してから警告します（衝撃だけでは反応しません）。感度が低いほど、衝撃の判定基準と静止の判定基準の両方が厳しくなります。</div>
 
     <label>異常検知後、キャンセルできる時間（秒）</label>
     <input type="number" id="countdownSec" value="30" min="10" max="120" disabled>
@@ -475,7 +476,7 @@ const DEFAULT_SETTINGS = {
   templateId: 'template_tszd80g',
   publicKey: 'Fn8Iqh1pfQf8aPIeQ',
   notifyEmails: ['sasaki-t@kyoeishoji.co.jp'],
-  sensitivity: 'verylow', // 'high' / 'medium' / 'low' / 'verylow'
+  sensitivity: 'medium', // 'high' / 'medium' / 'low' / 'verylow'
   countdownSec: 30,
   impactFeedback: true
 };
