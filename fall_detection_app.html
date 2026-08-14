@@ -306,6 +306,7 @@
     <button class="big-btn btn-start" id="toggleBtn" onclick="toggleMonitoring()">監視開始</button>
     <button class="big-btn btn-secondary" onclick="requestPermissions()">① センサー・位置情報の許可</button>
     <button class="big-btn btn-secondary" onclick="testAlert()">テスト通知（実際にメール送信）</button>
+    <div class="hint" style="text-align:left;margin-top:12px;">「監視開始」を押している間は、画面が自動で暗くなる（ロックされる）のを防ぎます（対応端末のみ）。ただし、他のアプリに切り替えたり、Safariごとバックグラウンドにすると検知は止まりますので、監視中はこの画面を開いたままにしてください。</div>
   </div>
 
   <div class="section" style="border-left-color:var(--alert);">
@@ -461,6 +462,7 @@ let countdownTimer = null;
 let audioCtx = null;
 let alarmOscInterval = null;
 let vibrateInterval = null;
+let wakeLock = null;
 
 const ADMIN_PASSWORD = 'passw0rd';
 let adminUnlocked = false;
@@ -764,7 +766,7 @@ function startMonitoring() {
   unlockAudioPlayback();
   const workerName = document.getElementById('workerName').value.trim();
   if (!workerName) {
-    alert('先に「作業者情報」欄に名前・IDを入力し、保存してください。');
+    alert('先に「作業者情報」欄で作業者を選択し、保存してください。');
     return;
   }
   if (typeof DeviceMotionEvent === 'undefined') {
@@ -782,6 +784,8 @@ function startMonitoring() {
     );
   }
 
+  requestWakeLock();
+
   monitoring = true;
   document.getElementById('statusDot').className = 'beacon active';
   document.getElementById('statusText').textContent = '監視中';
@@ -794,6 +798,7 @@ function startMonitoring() {
 function stopMonitoring() {
   if (motionHandler) window.removeEventListener('devicemotion', motionHandler);
   if (watchId) navigator.geolocation.clearWatch(watchId);
+  releaseWakeLock();
   monitoring = false;
   document.getElementById('statusDot').className = 'beacon';
   document.getElementById('statusText').textContent = '停止中';
@@ -802,6 +807,37 @@ function stopMonitoring() {
   document.getElementById('toggleBtn').className = 'big-btn btn-start';
   log('監視を停止しました');
 }
+
+// ---- 画面ロック防止（Wake Lock） ----
+// 監視中に画面が自動で暗くなる（ロックされる）のを防ぐ。対応ブラウザのみ有効。
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) {
+    log('この端末・ブラウザは画面ロック防止に対応していません');
+    return;
+  }
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    log('画面ロック防止を有効にしました');
+    wakeLock.addEventListener('release', () => {
+      wakeLock = null;
+    });
+  } catch (e) {
+    log('画面ロック防止の取得に失敗しました: ' + e.message);
+  }
+}
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release().catch(() => {});
+    wakeLock = null;
+  }
+}
+// アプリが再びフォアグラウンドに戻った時、監視中であればWake Lockを再取得する
+// （タブが非表示になるとブラウザ側で自動的に解除されるため）
+document.addEventListener('visibilitychange', () => {
+  if (monitoring && document.visibilityState === 'visible' && !wakeLock) {
+    requestWakeLock();
+  }
+});
 
 // ---- 衝撃検知時の即時フィードバック（短い振動＋音） ----
 function playImpactFeedback() {
