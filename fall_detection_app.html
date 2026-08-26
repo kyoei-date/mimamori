@@ -707,10 +707,10 @@ async function requestPermissions() {
 // ---- 感度パラメータ ----
 function getThresholds() {
   const level = document.getElementById('sensitivity').value;
-  if (level === 'high') return { impact: 18, stillVariance: 1.5, stillDelay: 2000, timeout: 5000 };
-  if (level === 'low') return { impact: 30, stillVariance: 1.0, stillDelay: 2000, timeout: 5000 };
-  if (level === 'verylow') return { impact: 42, stillVariance: 0.5, stillDelay: 3000, timeout: 7000 };
-  return { impact: 23, stillVariance: 1.2, stillDelay: 2000, timeout: 5000 }; // medium
+  if (level === 'high') return { impact: 18, stillVariance: 1.5, stillDelay: 10000, timeout: 12000 };
+  if (level === 'low') return { impact: 30, stillVariance: 1.0, stillDelay: 10000, timeout: 12000 };
+  if (level === 'verylow') return { impact: 42, stillVariance: 0.5, stillDelay: 10000, timeout: 12000 };
+  return { impact: 23, stillVariance: 1.2, stillDelay: 10000, timeout: 12000 }; // medium
 }
 
 // ---- 転倒検知ロジック ----
