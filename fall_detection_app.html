@@ -476,7 +476,7 @@ const DEFAULT_SETTINGS = {
   templateId: 'template_tszd80g',
   publicKey: 'Fn8Iqh1pfQf8aPIeQ',
   notifyEmails: ['sasaki-t@kyoeishoji.co.jp', 'fukuzawa@kyoeishoji.co.jp'],
-  sensitivity: 'low', // 'high' / 'medium' / 'low' / 'verylow'
+  sensitivity: 'verylow', // 'high' / 'medium' / 'low' / 'verylow'
   countdownSec: 30,
   impactFeedback: true
 };
@@ -735,17 +735,29 @@ function handleMotion(event) {
     if (s.impactFeedback !== false) playImpactFeedback();
   }
 
-  // 2. 衝撃後、一定時間の静止を確認
-  if (impactDetectedAt && Date.now() - impactDetectedAt > th.stillDelay) {
-    const recent = recentMagnitudes.slice(-10);
-    const avg = recent.reduce((a,b) => a+b, 0) / recent.length;
-    const variance = recent.reduce((a,b) => a + Math.pow(b-avg,2), 0) / recent.length;
+  // 2. 衝撃検知後の待機中は、常に「動きがないか」を継続的に監視する
+  if (impactDetectedAt) {
+    const elapsed = Date.now() - impactDetectedAt;
 
-    if (variance < th.stillVariance && !alertActive) {
-      log('衝撃後の静止を検知 → 転倒の可能性ありと判定');
-      triggerAlert();
+    // 衝撃直後の揺れ戻しは無視するため、少し経ってから判定を始める
+    if (elapsed > 500) {
+      const recent = recentMagnitudes.slice(-10);
+      const avg = recent.reduce((a,b) => a+b, 0) / recent.length;
+      const variance = recent.reduce((a,b) => a + Math.pow(b-avg,2), 0) / recent.length;
+
+      if (variance >= th.stillVariance) {
+        // 待機中に動きを検知 → 転倒ではないとみなしキャンセル（鳴らさない）
+        log('衝撃後に動きを検知 → 転倒ではないと判定しキャンセル');
+        impactDetectedAt = null;
+      }
     }
-    impactDetectedAt = null;
+
+    // stillDelay（10秒）の間ずっと動きがなければ転倒と判定
+    if (impactDetectedAt && Date.now() - impactDetectedAt > th.stillDelay && !alertActive) {
+      log('衝撃後、静止を継続して確認 → 転倒の可能性ありと判定');
+      triggerAlert();
+      impactDetectedAt = null;
+    }
   }
 
   // タイムアウトでリセット
