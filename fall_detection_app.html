@@ -717,6 +717,21 @@ function getThresholds() {
 let recentMagnitudes = [];
 let impactDetectedAt = null;
 
+// ---- 無動作（長時間まったく動きがない）検知 ----
+const INACTIVITY_LIMIT_MS = 65 * 60 * 1000; // 65分
+const MOVEMENT_VARIANCE = 0.05;             // これ以上の揺れがあれば「動いた」とみなす
+let lastMovementAt = Date.now();
+let inactivityTimer = null;
+
+function checkInactivity() {
+  if (!monitoring || alertActive) return;
+  if (Date.now() - lastMovementAt >= INACTIVITY_LIMIT_MS) {
+    log('65分間、端末に動きがありません → 無動作アラートを発動');
+    lastMovementAt = Date.now(); // 連続発報を防ぐ
+    triggerAlert(false, 'inactivity');
+  }
+}
+
 function handleMotion(event) {
   const acc = event.accelerationIncludingGravity;
   if (!acc || acc.x === null) return;
@@ -724,6 +739,14 @@ function handleMotion(event) {
 
   recentMagnitudes.push(mag);
   if (recentMagnitudes.length > 20) recentMagnitudes.shift();
+
+  // 無動作検知用：端末が少しでも動いていれば最終動作時刻を更新
+  if (recentMagnitudes.length >= 5) {
+    const r = recentMagnitudes.slice(-10);
+    const a = r.reduce((x,y) => x+y, 0) / r.length;
+    const v = r.reduce((x,y) => x + Math.pow(y-a,2), 0) / r.length;
+    if (v >= MOVEMENT_VARIANCE) lastMovementAt = Date.now();
+  }
 
   const th = getThresholds();
 
@@ -799,6 +822,9 @@ function startMonitoring() {
 
   requestWakeLock();
 
+  lastMovementAt = Date.now();
+  inactivityTimer = setInterval(checkInactivity, 10000);
+
   monitoring = true;
   document.getElementById('statusDot').className = 'beacon active';
   document.getElementById('statusText').textContent = '監視中';
@@ -812,6 +838,8 @@ function stopMonitoring() {
   if (motionHandler) window.removeEventListener('devicemotion', motionHandler);
   if (watchId) navigator.geolocation.clearWatch(watchId);
   releaseWakeLock();
+  clearInterval(inactivityTimer);
+  inactivityTimer = null;
   monitoring = false;
   document.getElementById('statusDot').className = 'beacon';
   document.getElementById('statusText').textContent = '停止中';
@@ -847,8 +875,10 @@ function releaseWakeLock() {
 // アプリが再びフォアグラウンドに戻った時、監視中であればWake Lockを再取得する
 // （タブが非表示になるとブラウザ側で自動的に解除されるため）
 document.addEventListener('visibilitychange', () => {
-  if (monitoring && document.visibilityState === 'visible' && !wakeLock) {
-    requestWakeLock();
+  if (monitoring && document.visibilityState === 'visible') {
+    // 画面が隠れている間はセンサーが止まるため、復帰時に無動作タイマーをリセット（誤報防止）
+    lastMovementAt = Date.now();
+    if (!wakeLock) requestWakeLock();
   }
 });
 
@@ -894,10 +924,10 @@ function stopAlarmVibrate() {
 }
 
 // ---- アラート発動 ----
-function triggerAlert(isTest) {
+function triggerAlert(isTest, reason) {
   alertActive = true;
   document.getElementById('alertOverlay').classList.add('show');
-  document.getElementById('alertTitle').textContent = '⚠️ 転倒の可能性を検知しました';
+  document.getElementById('alertTitle').textContent = reason === 'inactivity' ? '⚠️ 65分間動きがありません' : '⚠️ 転倒の可能性を検知しました';
   document.getElementById('alertDesc').textContent = '問題なければ下のボタンを押してください';
   document.getElementById('countdown').style.display = 'block';
   document.getElementById('sentMsg').style.display = 'none';
@@ -914,13 +944,14 @@ function triggerAlert(isTest) {
     document.getElementById('countdown').textContent = remaining;
     if (remaining <= 0) {
       clearInterval(countdownTimer);
-      sendAlertEmail(isTest);
+      sendAlertEmail(isTest, false, reason);
     }
   }, 1000);
 }
 
 function cancelAlert() {
   alertActive = false;
+  lastMovementAt = Date.now();
   clearInterval(countdownTimer);
   stopAlarmSound();
   stopAlarmVibrate();
@@ -957,7 +988,7 @@ async function testAlert() {
 }
 
 // ---- メール送信 ----
-async function sendAlertEmail(isTest, isManual) {
+async function sendAlertEmail(isTest, isManual, reason) {
   const s = JSON.parse(localStorage.getItem('fallDetectSettings') || '{}');
   stopAlarmSound();
   stopAlarmVibrate();
@@ -980,6 +1011,8 @@ async function sendAlertEmail(isTest, isManual) {
     messageText = `これはテスト通知です。実際の転倒ではありません。（作業者: ${workerName}）`;
   } else if (isManual) {
     messageText = `作業者「${workerName}」が緊急通知ボタンを押しました。至急確認・対応をお願いします。`;
+  } else if (reason === 'inactivity') {
+    messageText = `作業者「${workerName}」の端末が65分間まったく動いておらず、本人からの応答もありませんでした。至急確認をお願いします。`;
   } else {
     messageText = `作業者「${workerName}」について、一人作業見守りアプリが転倒の可能性を検知し、本人からの応答がありませんでした。至急確認をお願いします。`;
   }
