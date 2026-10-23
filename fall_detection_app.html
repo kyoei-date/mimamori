@@ -213,6 +213,32 @@
     font-family: "JetBrains Mono", monospace; font-size: 11px;
   }
 
+  /* 待機画面（黒画面）・スリープ防止表示 */
+  .wake-status { font-size: 11.5px; color: var(--steel); margin-top: 10px; }
+  .wake-status.warn { color: var(--alert); font-weight: 600; }
+  .hidden-notice {
+    display: none; margin-top: 12px; padding: 10px 12px; text-align: left;
+    border: 1.5px solid var(--alert); background: #FFF5F6; color: var(--alert);
+    font-size: 12.5px; font-weight: 600; line-height: 1.7;
+  }
+  .hidden-notice button {
+    margin-top: 8px; padding: 8px; width: 100%; border: 1px solid var(--alert);
+    background: #fff; color: var(--alert); font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  #standbyOverlay {
+    display: none; position: fixed; inset: 0; background: #000; z-index: 990;
+    flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  #standbyOverlay.show { display: flex; }
+  .standby-hint {
+    font-size: 14px; line-height: 1.9; color: #6b6b6b; opacity: 0; transition: opacity 0.4s;
+  }
+  .standby-hint.visible { opacity: 1; }
+  .standby-bar { width: 160px; height: 4px; background: #222; margin-top: 18px; opacity: 0; }
+  .standby-bar.visible { opacity: 1; }
+  .standby-bar i { display: block; height: 100%; width: 0; background: var(--signal); }
+
   /* 警告画面 */
   #alertOverlay {
     display: none;
@@ -304,9 +330,14 @@
     <div class="status-text" id="statusText">停止中</div>
     <div class="status-sub" id="statusSub">「監視開始」を押してください</div>
     <button class="big-btn btn-start" id="toggleBtn" onclick="toggleMonitoring()">監視開始</button>
+    <button class="big-btn btn-secondary" id="standbyBtn" onclick="enterStandby()" style="display:none;">🌙 待機画面（黒画面）にする</button>
+    <div class="wake-status" id="wakeStatus"></div>
+    <div class="hidden-notice" id="hiddenNotice">
+      <span id="hiddenNoticeText"></span>
+      <button type="button" onclick="dismissHiddenNotice()">確認しました</button>
+    </div>
     <button class="big-btn btn-secondary" onclick="requestPermissions()">① センサー・位置情報の許可</button>
     <button class="big-btn btn-secondary" onclick="testAlert()">テスト通知（実際にメール送信）</button>
-    <div class="hint" style="text-align:left;margin-top:12px;">「監視開始」を押している間は、画面が自動で暗くなる（ロックされる）のを防ぎます（対応端末のみ）。ただし、他のアプリに切り替えたり、Safariごとバックグラウンドにすると検知は止まりますので、監視中はこの画面を開いたままにしてください。</div>
   </div>
 
   <div class="section" style="border-left-color:var(--alert);">
@@ -319,20 +350,17 @@
   <div class="subtab-nav">
     <button class="subtab-btn active" id="subtabBtnProfile" onclick="switchSubTab('profile')">作業者情報</button>
     <button class="subtab-btn" id="subtabBtnSensitivity" onclick="switchSubTab('sensitivity')">感度設定</button>
+    <button class="subtab-btn" id="subtabBtnLog" onclick="switchSubTab('log')">動作ログ</button>
   </div>
 
   <div class="subtab-panel active" id="subtabProfile">
   <div class="section">
     <div class="eyebrow">Worker Profile</div>
     <h2>作業者情報</h2>
-    <div class="hint" id="workerNameHintAuto" style="display:none;">この端末の作業者名は、管理者から配布されたURLによって自動で設定されています。変更が必要な場合は管理者にご連絡ください。</div>
-    <div class="hint" id="workerNameHintManual">一覧から、このスマホを使う作業者を選んでください（一覧は管理者が登録した作業者一覧から自動で表示されます）。転倒検知時、通知メールに「誰が倒れたか」として記載されます。</div>
+    <div class="hint">このスマホを使う作業者の名前・IDを入力してください。転倒検知時、通知メールに「誰が倒れたか」として記載されます。</div>
     <label>作業者名 / ID</label>
-    <select id="workerName" onchange="updateWorkerBadge()">
-      <option value="">選択してください</option>
-    </select>
-    <button class="big-btn btn-secondary" id="saveWorkerBtn" onclick="saveWorkerName()">作業者情報を保存</button>
-    <div class="save-msg" id="saveMsg">保存しました</div>
+    <input type="text" id="workerName" placeholder="例: 田中太郎 / 佐々木" autocomplete="off" oninput="updateWorkerBadge()">
+    <button class="big-btn btn-secondary" onclick="saveSettings()">作業者情報を保存</button>
   </div>
   </div>
 
@@ -340,24 +368,32 @@
   <div class="section">
     <div class="eyebrow">Sensitivity</div>
     <h2>感度設定</h2>
-    <div class="hint">感度・キャンセル時間などはコード内の <code>DEFAULT_SETTINGS</code> で全端末共通に管理されています。下は現在の設定値の確認用で、この画面からは変更できません。変更したい場合は管理者にファイルの書き換えを依頼してください。</div>
     <label>転倒判定の感度</label>
-    <select id="sensitivity" disabled>
-      <option value="high">高感度（弱い衝撃＋静止確認）</option>
-      <option value="medium">標準（中程度の衝撃＋静止確認）</option>
-      <option value="low">低感度（強い衝撃＋静止確認）</option>
-      <option value="verylow">最低感度（非常に強い衝撃＋厳しめの静止確認）</option>
+    <select id="sensitivity">
+      <option value="high">高感度（弱い衝撃でも反応）</option>
+      <option value="medium" selected>標準</option>
+      <option value="low">低感度（強い衝撃のみ）</option>
     </select>
-    <div class="hint">どの感度でも、衝撃を検知した後に「体が動いていないか」を確認してから警告します（衝撃だけでは反応しません）。感度が低いほど、衝撃の判定基準と静止の判定基準の両方が厳しくなります。</div>
+    <div class="hint">誤検知が多い場合は「低感度」に、反応しない場合は「高感度」にしてください。</div>
 
     <label>異常検知後、キャンセルできる時間（秒）</label>
-    <input type="number" id="countdownSec" value="30" min="10" max="120" disabled>
+    <input type="number" id="countdownSec" value="30" min="10" max="120">
+    <div class="hint">この時間内に画面の「私は大丈夫です」を押さないと自動でメール送信されます。</div>
 
     <label style="display:flex;align-items:center;gap:8px;margin-top:14px;">
-      <input type="checkbox" id="impactFeedback" checked style="width:auto;" disabled>
+      <input type="checkbox" id="impactFeedback" checked style="width:auto;" onchange="saveSettings()">
       衝撃を検知した瞬間に振動・音で知らせる
     </label>
+    <div class="hint">テスト時の確認に便利です。現場作業中に邪魔な場合はオフにできます（最終的な転倒アラームの音・振動は別途鳴ります）。</div>
     <div class="hint">※ iPhone（iOS）は仕様上バイブレーションに対応していないため、音のみで通知されます。Androidではバイブも鳴ります。</div>
+  </div>
+  </div>
+
+  <div class="subtab-panel" id="subtabLog">
+  <div class="section">
+    <div class="eyebrow">Log</div>
+    <h2>動作ログ</h2>
+    <div class="log-box" id="logBox">-</div>
   </div>
   </div>
   </div>
@@ -371,32 +407,32 @@
   </div>
 
   <div class="section" id="adminContent" style="display:none;">
-    <div class="eyebrow">Worker Links</div>
-    <h2>作業者用リンクの発行</h2>
-    <div class="hint">HTMLファイル内の <code>WORKER_LIST</code> に作業者名を登録すると、ここに一人ずつ専用のURLが表示されます。そのURLをLINEなどで本人に送るだけで、作業者側は名前入力が不要になります（リンクを開くと自動でその名前が設定され、入力欄はロックされます）。</div>
-    <div id="workerLinkList" style="margin-top:10px;"></div>
-    <div class="hint" id="workerLinkEmptyHint" style="display:none;">まだ <code>WORKER_LIST</code> に名前が登録されていません。ファイル内の <code>WORKER_LIST = []</code> に名前を追加してください（例: <code>['田中太郎', '佐々木']</code>）。</div>
-  </div>
-
-  <div class="section" id="adminContent2" style="display:none;">
     <div class="eyebrow">Notify</div>
     <h2>通知先メール設定（EmailJS）</h2>
-    <div class="hint">Service ID・Template ID・Public Key・通知先メールアドレスは、コード内の <code>DEFAULT_SETTINGS</code> で全端末共通に管理されており、この画面では確認のみで編集できません。内容を変更する場合は、HTMLファイル内の <code>DEFAULT_SETTINGS</code> を書き換えて配布し直してください（配布し直せば、次回起動時に全端末へ自動で反映されます）。</div>
+    <div class="hint">ブラウザから直接メール送信はできないため、無料の EmailJS というサービスを使います。下の「設定手順」を開いて、Service ID・Template ID・Public Key を取得して入力してください。</div>
 
     <label>通知先メールアドレス（複数登録可）</label>
     <div id="emailChipList" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;"></div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <input type="email" id="newEmailInput" placeholder="例: manager@example.com" autocomplete="off" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();addNotifyEmail();}">
+      <button type="button" onclick="addNotifyEmail()" style="flex-shrink:0;padding:0 16px;border:1.5px solid var(--ink);background:var(--ink);color:#fff;font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:0.03em;cursor:pointer;">追加</button>
+    </div>
+    <div class="hint">登録した全員に同時に通知メールが送られます。1件ずつ入力して「追加」を押してください。</div>
 
-    <label>EmailJS Service ID</label>
-    <input type="text" id="serviceId" placeholder="（DEFAULT_SETTINGSに未設定）" autocomplete="off" name="ejs_service_id" readonly>
+    <label>EmailJS Service ID（EmailJSサイトで取得。メールアドレスではありません）</label>
+    <input type="text" id="serviceId" placeholder="例: service_xxxxxxx" autocomplete="off" name="ejs_service_id">
 
-    <label>EmailJS Template ID</label>
-    <input type="text" id="templateId" placeholder="（DEFAULT_SETTINGSに未設定）" autocomplete="off" name="ejs_template_id" readonly>
+    <label>EmailJS Template ID（EmailJSサイトで取得。メールアドレスではありません）</label>
+    <input type="text" id="templateId" placeholder="例: template_xxxxxxx" autocomplete="off" name="ejs_template_id">
 
-    <label>EmailJS Public Key</label>
-    <input type="text" id="publicKey" placeholder="（DEFAULT_SETTINGSに未設定）" autocomplete="off" name="ejs_public_key" readonly>
+    <label>EmailJS Public Key（EmailJSサイトで取得。メールアドレスではありません）</label>
+    <input type="text" id="publicKey" placeholder="例: xxxxxxxxxxxxxxxx" autocomplete="off" name="ejs_public_key">
+
+    <button class="big-btn btn-secondary" onclick="saveSettings()">設定を保存</button>
+    <div class="save-msg" id="saveMsg">保存しました</div>
 
     <details>
-      <summary>EmailJSの設定手順（DEFAULT_SETTINGSへの反映方法）</summary>
+      <summary>EmailJSの設定手順（初回のみ）</summary>
       <div class="steps">
         1. <code>https://www.emailjs.com/</code> で無料アカウントを作成<br>
         2. 「Email Services」→ Gmail等を接続 → <code>Service ID</code> をコピー<br>
@@ -404,21 +440,14 @@
            <code>{{worker_name}}</code> <code>{{message}}</code> <code>{{time}}</code> <code>{{location}}</code><br>
            → <code>Template ID</code> をコピー<br>
         4. 「Account」→ 「API Keys」→ <code>Public Key</code> をコピー<br>
-        5. 上の3つと通知先メールアドレスを、HTMLファイル内の <code>DEFAULT_SETTINGS</code> に書き込んで保存<br>
-        6. ファイルを配布し直す（GitHub Pages等のURLを更新）<br>
-        7. 各端末で開き直し、「テスト通知」ボタンで実際に届くか確認してください<br>
+        5. 上の3つとメールアドレスをこのアプリに入力して保存<br>
+        6. 「テスト通知」ボタンで実際に届くか確認してください<br>
         <br>
         ※ 既にテンプレートを作成済みの場合は、EmailJSの管理画面でテンプレート本文に <code>作業者: {{worker_name}}</code> を追記し、保存し直してください。<br>
         <br>
         ※ 複数人に通知するには、テンプレート編集画面の右側にある「To Email」欄を、固定のメールアドレスではなく <code>{{to_email}}</code> という変数に変更して保存してください。これをしないと、登録した2人目以降に届きません。
       </div>
     </details>
-  </div>
-
-  <div class="section" id="adminLogSection">
-    <div class="eyebrow">Log</div>
-    <h2>動作ログ</h2>
-    <div class="log-box" id="logBox">-</div>
   </div>
   </div>
 </div>
@@ -434,6 +463,11 @@
       <button class="btn-start" style="color:#fff;" onclick="checkAdminPassword()">開く</button>
     </div>
   </div>
+</div>
+
+<div id="standbyOverlay">
+  <div class="standby-hint" id="standbyHint">監視中です<br>画面を2秒間長押しすると解除します</div>
+  <div class="standby-bar" id="standbyBar"><i id="standbyBarFill"></i></div>
 </div>
 
 <div id="alertOverlay">
@@ -463,31 +497,9 @@ let countdownTimer = null;
 let audioCtx = null;
 let alarmOscInterval = null;
 let vibrateInterval = null;
-let wakeLock = null;
 
 const ADMIN_PASSWORD = 'passw0rd';
 let adminUnlocked = false;
-
-// ---- 共有設定のデフォルト値（全端末共通。ここを1回書き換えれば全員分に反映されます） ----
-// ※ ここに値を入れておくと、全端末で起動のたびに自動でこの内容に上書きされます。
-//    （EmailJSの設定・通知先メール・感度などは、端末側で入力・変更する必要はありません）
-const DEFAULT_SETTINGS = {
-  serviceId: 'service_gtm9fo3',
-  templateId: 'template_tszd80g',
-  publicKey: 'Fn8Iqh1pfQf8aPIeQ',
-  notifyEmails: ['sasaki-t@kyoeishoji.co.jp', 'fukuzawa@kyoeishoji.co.jp'],
-  sensitivity: 'low', // 'high' / 'medium' / 'low' / 'verylow'
-  countdownSec: 30,
-  impactFeedback: true
-};
-
-// ---- 作業者一覧（管理者がここに名前を登録すると、各自専用のURLを発行できます） ----
-// 例: const WORKER_LIST = ['田中太郎', '佐々木', '山田花子'];
-const WORKER_LIST = [
-  '佐々木 拓也',
-  '福澤 貴',
-  '小川 勇徳'
-];
 
 // ---- タブ切り替え ----
 function switchTab(name) {
@@ -497,12 +509,14 @@ function switchTab(name) {
   document.getElementById('tabBtnAdmin').classList.toggle('active', name === 'admin');
 }
 
-// ---- サブタブ切り替え（作業者情報 / 感度設定） ----
+// ---- サブタブ切り替え（作業者情報 / 感度設定 / 動作ログ） ----
 function switchSubTab(name) {
   document.getElementById('subtabProfile').classList.toggle('active', name === 'profile');
   document.getElementById('subtabSensitivity').classList.toggle('active', name === 'sensitivity');
+  document.getElementById('subtabLog').classList.toggle('active', name === 'log');
   document.getElementById('subtabBtnProfile').classList.toggle('active', name === 'profile');
   document.getElementById('subtabBtnSensitivity').classList.toggle('active', name === 'sensitivity');
+  document.getElementById('subtabBtnLog').classList.toggle('active', name === 'log');
 }
 
 // ---- 管理者パスワード ----
@@ -520,8 +534,6 @@ function checkAdminPassword() {
     adminUnlocked = true;
     document.getElementById('adminLockedNotice').style.display = 'none';
     document.getElementById('adminContent').style.display = 'block';
-    document.getElementById('adminContent2').style.display = 'block';
-    renderWorkerLinks();
     closeAdminPasswordModal();
     log('管理者設定を開きました');
   } else {
@@ -529,57 +541,42 @@ function checkAdminPassword() {
   }
 }
 
-// ---- 作業者用リンクの発行 ----
-function renderWorkerLinks() {
-  const listEl = document.getElementById('workerLinkList');
-  const emptyHint = document.getElementById('workerLinkEmptyHint');
-  if (!WORKER_LIST || WORKER_LIST.length === 0) {
-    listEl.innerHTML = '';
-    emptyHint.style.display = 'block';
-    return;
-  }
-  emptyHint.style.display = 'none';
-  const base = location.origin + location.pathname;
-  listEl.innerHTML = WORKER_LIST.map((name, i) => {
-    const url = `${base}?worker=${encodeURIComponent(name)}`;
-    return `
-      <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);padding:8px 10px;margin-bottom:6px;">
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:600;font-size:13px;">${name}</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--steel);word-break:break-all;">${url}</div>
-        </div>
-        <button type="button" onclick="copyWorkerLink(${i}, this)" style="flex-shrink:0;padding:8px 12px;border:1.5px solid var(--ink);background:var(--ink);color:#fff;font-family:'Oswald',sans-serif;font-weight:600;font-size:12px;letter-spacing:0.02em;cursor:pointer;">コピー</button>
-      </div>`;
-  }).join('');
-}
-function copyWorkerLink(index, btn) {
-  const name = WORKER_LIST[index];
-  const base = location.origin + location.pathname;
-  const url = `${base}?worker=${encodeURIComponent(name)}`;
-  const done = () => {
-    const orig = btn.textContent;
-    btn.textContent = 'コピーしました';
-    setTimeout(() => { btn.textContent = orig; }, 1500);
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(done).catch(() => prompt('このURLをコピーしてください', url));
-  } else {
-    prompt('このURLをコピーしてください', url);
-  }
-}
-
-// ---- 通知先メールアドレス（複数・DEFAULT_SETTINGSから表示のみ） ----
+// ---- 通知先メールアドレス（複数） ----
 let currentEmails = [];
 
 function renderEmailChips() {
   const list = document.getElementById('emailChipList');
   if (currentEmails.length === 0) {
-    list.innerHTML = '<span class="hint" style="margin-top:0;">DEFAULT_SETTINGSに未登録です</span>';
+    list.innerHTML = '<span class="hint" style="margin-top:0;">まだ登録されていません</span>';
     return;
   }
-  list.innerHTML = currentEmails.map(email =>
-    `<span class="email-chip">${email}</span>`
+  list.innerHTML = currentEmails.map((email, i) =>
+    `<span class="email-chip">${email}<button type="button" onclick="removeNotifyEmail(${i})" aria-label="削除">×</button></span>`
   ).join('');
+}
+
+function addNotifyEmail() {
+  const input = document.getElementById('newEmailInput');
+  const email = input.value.trim();
+  if (!email) return;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    alert('正しいメールアドレスの形式で入力してください。');
+    return;
+  }
+  if (currentEmails.includes(email)) {
+    alert('そのメールアドレスは既に登録されています。');
+    return;
+  }
+  currentEmails.push(email);
+  input.value = '';
+  renderEmailChips();
+  saveSettings();
+}
+
+function removeNotifyEmail(index) {
+  currentEmails.splice(index, 1);
+  renderEmailChips();
+  saveSettings();
 }
 
 // ---- ログ ----
@@ -589,55 +586,19 @@ function log(msg) {
   box.innerHTML = `[${time}] ${msg}<br>` + box.innerHTML;
 }
 
-// ---- 作業者名選択肢の描画（WORKER_LISTから自動生成） ----
-function renderWorkerNameOptions(currentValue) {
-  const sel = document.getElementById('workerName');
-  const names = WORKER_LIST.slice();
-  // 既に保存されている名前がWORKER_LISTに無い場合（登録漏れ等）も表示だけはできるようにしておく
-  if (currentValue && !names.includes(currentValue)) names.push(currentValue);
-  sel.innerHTML = '<option value="">選択してください</option>' +
-    names.map(n => `<option value="${n}">${n}</option>`).join('');
-  sel.value = currentValue || '';
-}
-
 // ---- 設定の保存・読込 ----
 function loadSettings() {
-  const raw = JSON.parse(localStorage.getItem('fallDetectSettings') || '{}');
-  // URLに ?worker=名前 が付いている場合、管理者が配布した専用リンクとして最優先で採用する
-  const urlWorker = new URLSearchParams(location.search).get('worker');
-  const workerLockedByUrl = !!(urlWorker && urlWorker.trim());
-  // 共有項目は常にコード内のDEFAULT_SETTINGSを正として上書きする（端末側の手動変更・保存は無視される）
-  // 作業者名は、URL指定があればそれを最優先。なければ端末（作業者）ごとに保存済みの値を使う
-  const s = {
-    serviceId: DEFAULT_SETTINGS.serviceId,
-    templateId: DEFAULT_SETTINGS.templateId,
-    publicKey: DEFAULT_SETTINGS.publicKey,
-    notifyEmails: DEFAULT_SETTINGS.notifyEmails,
-    sensitivity: DEFAULT_SETTINGS.sensitivity,
-    countdownSec: DEFAULT_SETTINGS.countdownSec,
-    impactFeedback: DEFAULT_SETTINGS.impactFeedback,
-    workerName: workerLockedByUrl ? urlWorker.trim() : (raw.workerName || '')
-  };
-  currentEmails = s.notifyEmails;
+  const s = JSON.parse(localStorage.getItem('fallDetectSettings') || '{}');
+  currentEmails = s.notifyEmails || (s.notifyEmail ? [s.notifyEmail] : []);
   renderEmailChips();
-  document.getElementById('serviceId').value = s.serviceId;
-  document.getElementById('templateId').value = s.templateId;
-  document.getElementById('publicKey').value = s.publicKey;
-  document.getElementById('sensitivity').value = s.sensitivity;
-  document.getElementById('countdownSec').value = s.countdownSec;
-  renderWorkerNameOptions(s.workerName);
+  if (s.serviceId) document.getElementById('serviceId').value = s.serviceId;
+  if (s.templateId) document.getElementById('templateId').value = s.templateId;
+  if (s.publicKey) document.getElementById('publicKey').value = s.publicKey;
+  if (s.sensitivity) document.getElementById('sensitivity').value = s.sensitivity;
+  if (s.countdownSec) document.getElementById('countdownSec').value = s.countdownSec;
+  if (s.workerName) document.getElementById('workerName').value = s.workerName;
   document.getElementById('impactFeedback').checked = s.impactFeedback !== false;
-
-  // URL指定で作業者名が固定されている端末は、選択欄をロックして誤変更を防ぐ
-  const nameInput = document.getElementById('workerName');
-  nameInput.disabled = workerLockedByUrl;
-  document.getElementById('saveWorkerBtn').style.display = workerLockedByUrl ? 'none' : 'block';
-  document.getElementById('workerNameHintAuto').style.display = workerLockedByUrl ? 'block' : 'none';
-  document.getElementById('workerNameHintManual').style.display = workerLockedByUrl ? 'none' : 'block';
-
   updateWorkerBadge();
-  // 常にDEFAULT_SETTINGS内容（＋作業者名）で端末側のlocalStorageを上書きしておく
-  localStorage.setItem('fallDetectSettings', JSON.stringify(s));
 }
 function updateWorkerBadge() {
   const name = document.getElementById('workerName').value.trim();
@@ -646,24 +607,26 @@ function updateWorkerBadge() {
   badge.style.color = name ? '#435364' : '#D7263D';
   badge.style.borderColor = name ? '#DCD6C7' : '#D7263D';
 }
-function saveWorkerName() {
-  const raw = JSON.parse(localStorage.getItem('fallDetectSettings') || '{}');
+function saveSettings() {
   const s = {
-    notifyEmails: DEFAULT_SETTINGS.notifyEmails,
-    serviceId: DEFAULT_SETTINGS.serviceId,
-    templateId: DEFAULT_SETTINGS.templateId,
-    publicKey: DEFAULT_SETTINGS.publicKey,
-    sensitivity: DEFAULT_SETTINGS.sensitivity,
-    countdownSec: DEFAULT_SETTINGS.countdownSec,
-    impactFeedback: DEFAULT_SETTINGS.impactFeedback,
-    workerName: document.getElementById('workerName').value.trim()
+    notifyEmails: currentEmails,
+    serviceId: document.getElementById('serviceId').value,
+    templateId: document.getElementById('templateId').value,
+    publicKey: document.getElementById('publicKey').value,
+    sensitivity: document.getElementById('sensitivity').value,
+    countdownSec: document.getElementById('countdownSec').value,
+    workerName: document.getElementById('workerName').value.trim(),
+    impactFeedback: document.getElementById('impactFeedback').checked
   };
   localStorage.setItem('fallDetectSettings', JSON.stringify(s));
+  if (s.publicKey) {
+    try { emailjs.init(s.publicKey); } catch(e) {}
+  }
   updateWorkerBadge();
   const msg = document.getElementById('saveMsg');
   msg.style.display = 'block';
   setTimeout(() => msg.style.display = 'none', 2000);
-  log('作業者情報を保存しました');
+  log('設定を保存しました');
 }
 
 // ---- iOSの自動再生制限を解除（ボタン押下時に無音で一度再生しておく） ----
@@ -707,30 +670,14 @@ async function requestPermissions() {
 // ---- 感度パラメータ ----
 function getThresholds() {
   const level = document.getElementById('sensitivity').value;
-  if (level === 'high') return { impact: 18, stillVariance: 1.5, stillDelay: 10000, timeout: 12000 };
-  if (level === 'low') return { impact: 30, stillVariance: 1.0, stillDelay: 10000, timeout: 12000 };
-  if (level === 'verylow') return { impact: 42, stillVariance: 0.5, stillDelay: 10000, timeout: 12000 };
-  return { impact: 23, stillVariance: 1.2, stillDelay: 10000, timeout: 12000 }; // medium
+  if (level === 'high') return { impact: 18, stillVariance: 1.5 };
+  if (level === 'low') return { impact: 30, stillVariance: 1.0 };
+  return { impact: 23, stillVariance: 1.2 }; // medium
 }
 
 // ---- 転倒検知ロジック ----
 let recentMagnitudes = [];
 let impactDetectedAt = null;
-
-// ---- 無動作（長時間まったく動きがない）検知 ----
-const INACTIVITY_LIMIT_MS = 65 * 60 * 1000; // 65分
-const MOVEMENT_VARIANCE = 0.05;             // これ以上の揺れがあれば「動いた」とみなす
-let lastMovementAt = Date.now();
-let inactivityTimer = null;
-
-function checkInactivity() {
-  if (!monitoring || alertActive) return;
-  if (Date.now() - lastMovementAt >= INACTIVITY_LIMIT_MS) {
-    log('65分間、端末に動きがありません → 無動作アラートを発動');
-    lastMovementAt = Date.now(); // 連続発報を防ぐ
-    triggerAlert(false, 'inactivity');
-  }
-}
 
 function handleMotion(event) {
   const acc = event.accelerationIncludingGravity;
@@ -739,14 +686,6 @@ function handleMotion(event) {
 
   recentMagnitudes.push(mag);
   if (recentMagnitudes.length > 20) recentMagnitudes.shift();
-
-  // 無動作検知用：端末が少しでも動いていれば最終動作時刻を更新
-  if (recentMagnitudes.length >= 5) {
-    const r = recentMagnitudes.slice(-10);
-    const a = r.reduce((x,y) => x+y, 0) / r.length;
-    const v = r.reduce((x,y) => x + Math.pow(y-a,2), 0) / r.length;
-    if (v >= MOVEMENT_VARIANCE) lastMovementAt = Date.now();
-  }
 
   const th = getThresholds();
 
@@ -758,33 +697,21 @@ function handleMotion(event) {
     if (s.impactFeedback !== false) playImpactFeedback();
   }
 
-  // 2. 衝撃検知後の待機中は、常に「動きがないか」を継続的に監視する
-  if (impactDetectedAt) {
-    const elapsed = Date.now() - impactDetectedAt;
+  // 2. 衝撃後、一定時間の静止を確認
+  if (impactDetectedAt && Date.now() - impactDetectedAt > 2000) {
+    const recent = recentMagnitudes.slice(-10);
+    const avg = recent.reduce((a,b) => a+b, 0) / recent.length;
+    const variance = recent.reduce((a,b) => a + Math.pow(b-avg,2), 0) / recent.length;
 
-    // 衝撃直後の揺れ戻しは無視するため、少し経ってから判定を始める
-    if (elapsed > 500) {
-      const recent = recentMagnitudes.slice(-10);
-      const avg = recent.reduce((a,b) => a+b, 0) / recent.length;
-      const variance = recent.reduce((a,b) => a + Math.pow(b-avg,2), 0) / recent.length;
-
-      if (variance >= th.stillVariance) {
-        // 待機中に動きを検知 → 転倒ではないとみなしキャンセル（鳴らさない）
-        log('衝撃後に動きを検知 → 転倒ではないと判定しキャンセル');
-        impactDetectedAt = null;
-      }
-    }
-
-    // stillDelay（10秒）の間ずっと動きがなければ転倒と判定
-    if (impactDetectedAt && Date.now() - impactDetectedAt > th.stillDelay && !alertActive) {
-      log('衝撃後、静止を継続して確認 → 転倒の可能性ありと判定');
+    if (variance < th.stillVariance && !alertActive) {
+      log('衝撃後の静止を検知 → 転倒の可能性ありと判定');
       triggerAlert();
-      impactDetectedAt = null;
     }
+    impactDetectedAt = null;
   }
 
   // タイムアウトでリセット
-  if (impactDetectedAt && Date.now() - impactDetectedAt > th.timeout) {
+  if (impactDetectedAt && Date.now() - impactDetectedAt > 5000) {
     impactDetectedAt = null;
   }
 }
@@ -798,11 +725,131 @@ function toggleMonitoring() {
   }
 }
 
+// ---- 画面スリープ防止（Wake Lock） ----
+let wakeLockSentinel = null;
+function setWakeStatus(state, extra) {
+  const el = document.getElementById('wakeStatus');
+  if (state === null) { el.textContent = ''; el.className = 'wake-status'; return; }
+  if (state) {
+    el.textContent = '🔆 画面スリープ防止: ON';
+    el.className = 'wake-status';
+  } else {
+    el.textContent = `⚠️ 画面スリープ防止: ${extra || 'OFF'}（端末の自動ロックを「なし」に設定してください）`;
+    el.className = 'wake-status warn';
+  }
+}
+async function requestWakeLock() {
+  if (wakeLockSentinel) return;
+  if (!('wakeLock' in navigator)) { setWakeStatus(false, '非対応'); log('Wake Lock非対応のブラウザです'); return; }
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+    wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+    setWakeStatus(true);
+    log('画面スリープ防止: ON');
+  } catch (e) {
+    setWakeStatus(false, '取得失敗');
+    log('Wake Lock取得失敗: ' + (e.message || e));
+  }
+}
+async function releaseWakeLock() {
+  if (wakeLockSentinel) { try { await wakeLockSentinel.release(); } catch (e) {} wakeLockSentinel = null; }
+  setWakeStatus(null);
+}
+
+// ---- 待機画面（黒画面）：長押しで解除 ----
+const STANDBY_HOLD_MS = 2000;
+let standbyActive = false, standbyHoldTimer = null, standbyHintTimer = null;
+function showStandbyHint(ms) {
+  document.getElementById('standbyHint').classList.add('visible');
+  clearTimeout(standbyHintTimer);
+  standbyHintTimer = setTimeout(() => document.getElementById('standbyHint').classList.remove('visible'), ms);
+}
+function enterStandby() {
+  if (!monitoring) { alert('先に「監視開始」を押してください。'); return; }
+  standbyActive = true;
+  document.getElementById('standbyOverlay').classList.add('show');
+  showStandbyHint(5000);
+  log('待機画面（黒画面）に切り替えました');
+  logBattery('待機画面開始');
+}
+function exitStandby() {
+  if (!standbyActive) return;
+  standbyActive = false;
+  clearTimeout(standbyHoldTimer);
+  clearTimeout(standbyHintTimer);
+  resetStandbyBar();
+  document.getElementById('standbyHint').classList.remove('visible');
+  document.getElementById('standbyOverlay').classList.remove('show');
+  log('待機画面を解除しました');
+}
+function resetStandbyBar() {
+  const fill = document.getElementById('standbyBarFill');
+  fill.style.transition = 'none';
+  fill.style.width = '0';
+  document.getElementById('standbyBar').classList.remove('visible');
+}
+(function setupStandbyGestures() {
+  const ov = document.getElementById('standbyOverlay');
+  ov.addEventListener('pointerdown', () => {
+    showStandbyHint(3000);
+    const bar = document.getElementById('standbyBar');
+    const fill = document.getElementById('standbyBarFill');
+    bar.classList.add('visible');
+    fill.style.transition = 'none';
+    fill.style.width = '0';
+    void fill.offsetWidth;
+    fill.style.transition = `width ${STANDBY_HOLD_MS}ms linear`;
+    fill.style.width = '100%';
+    clearTimeout(standbyHoldTimer);
+    standbyHoldTimer = setTimeout(exitStandby, STANDBY_HOLD_MS);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => {
+    ov.addEventListener(ev, () => { clearTimeout(standbyHoldTimer); resetStandbyBar(); });
+  });
+  ov.addEventListener('contextmenu', e => e.preventDefault());
+})();
+
+// ---- 非表示（他アプリ切替・画面ロック）の検知 ----
+let hiddenAt = null;
+function dismissHiddenNotice() { document.getElementById('hiddenNotice').style.display = 'none'; }
+function showHiddenNotice(sec) {
+  exitStandby();
+  document.getElementById('hiddenNoticeText').textContent =
+    `⚠️ 画面が約${sec}秒間表示されていませんでした（他アプリへの切替または画面ロック）。この間は転倒を検知できていない可能性があります。`;
+  document.getElementById('hiddenNotice').style.display = 'block';
+  log(`画面が非表示でした（約${sec}秒）。この間は監視が止まっていた可能性があります`);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    hiddenAt = Date.now();
+    if (monitoring) log('画面が非表示になりました（他アプリ切替／画面ロック）');
+  } else {
+    if (monitoring) {
+      requestWakeLock();
+      if (hiddenAt) {
+        const sec = Math.round((Date.now() - hiddenAt) / 1000);
+        if (sec >= 5) showHiddenNotice(sec);
+      }
+    }
+    hiddenAt = null;
+  }
+});
+
+// ---- バッテリー残量ログ（Android Chrome等のみ。iPhoneは非対応のため記録されません） ----
+let batteryTimer = null;
+async function logBattery(label) {
+  try {
+    if (!navigator.getBattery) return;
+    const b = await navigator.getBattery();
+    log(`🔋 ${label}: ${Math.round(b.level * 100)}%${b.charging ? '（充電中）' : ''}`);
+  } catch (e) {}
+}
+
 function startMonitoring() {
   unlockAudioPlayback();
   const workerName = document.getElementById('workerName').value.trim();
   if (!workerName) {
-    alert('先に「作業者情報」欄で作業者を選択し、保存してください。');
+    alert('先に「作業者情報」欄に名前・IDを入力し、保存してください。');
     return;
   }
   if (typeof DeviceMotionEvent === 'undefined') {
@@ -820,11 +867,6 @@ function startMonitoring() {
     );
   }
 
-  requestWakeLock();
-
-  lastMovementAt = Date.now();
-  inactivityTimer = setInterval(checkInactivity, 10000);
-
   monitoring = true;
   document.getElementById('statusDot').className = 'beacon active';
   document.getElementById('statusText').textContent = '監視中';
@@ -832,14 +874,16 @@ function startMonitoring() {
   document.getElementById('toggleBtn').textContent = '監視停止';
   document.getElementById('toggleBtn').className = 'big-btn btn-stop';
   log('監視を開始しました');
+  document.getElementById('standbyBtn').style.display = 'block';
+  requestWakeLock();
+  logBattery('監視開始');
+  clearInterval(batteryTimer);
+  batteryTimer = setInterval(() => logBattery('経過確認'), 15 * 60 * 1000);
 }
 
 function stopMonitoring() {
   if (motionHandler) window.removeEventListener('devicemotion', motionHandler);
   if (watchId) navigator.geolocation.clearWatch(watchId);
-  releaseWakeLock();
-  clearInterval(inactivityTimer);
-  inactivityTimer = null;
   monitoring = false;
   document.getElementById('statusDot').className = 'beacon';
   document.getElementById('statusText').textContent = '停止中';
@@ -847,40 +891,13 @@ function stopMonitoring() {
   document.getElementById('toggleBtn').textContent = '監視開始';
   document.getElementById('toggleBtn').className = 'big-btn btn-start';
   log('監視を停止しました');
+  exitStandby();
+  document.getElementById('standbyBtn').style.display = 'none';
+  dismissHiddenNotice();
+  releaseWakeLock();
+  logBattery('監視停止');
+  clearInterval(batteryTimer);
 }
-
-// ---- 画面ロック防止（Wake Lock） ----
-// 監視中に画面が自動で暗くなる（ロックされる）のを防ぐ。対応ブラウザのみ有効。
-async function requestWakeLock() {
-  if (!('wakeLock' in navigator)) {
-    log('この端末・ブラウザは画面ロック防止に対応していません');
-    return;
-  }
-  try {
-    wakeLock = await navigator.wakeLock.request('screen');
-    log('画面ロック防止を有効にしました');
-    wakeLock.addEventListener('release', () => {
-      wakeLock = null;
-    });
-  } catch (e) {
-    log('画面ロック防止の取得に失敗しました: ' + e.message);
-  }
-}
-function releaseWakeLock() {
-  if (wakeLock) {
-    wakeLock.release().catch(() => {});
-    wakeLock = null;
-  }
-}
-// アプリが再びフォアグラウンドに戻った時、監視中であればWake Lockを再取得する
-// （タブが非表示になるとブラウザ側で自動的に解除されるため）
-document.addEventListener('visibilitychange', () => {
-  if (monitoring && document.visibilityState === 'visible') {
-    // 画面が隠れている間はセンサーが止まるため、復帰時に無動作タイマーをリセット（誤報防止）
-    lastMovementAt = Date.now();
-    if (!wakeLock) requestWakeLock();
-  }
-});
 
 // ---- 衝撃検知時の即時フィードバック（短い振動＋音） ----
 function playImpactFeedback() {
@@ -924,10 +941,11 @@ function stopAlarmVibrate() {
 }
 
 // ---- アラート発動 ----
-function triggerAlert(isTest, reason) {
+function triggerAlert(isTest) {
+  exitStandby();
   alertActive = true;
   document.getElementById('alertOverlay').classList.add('show');
-  document.getElementById('alertTitle').textContent = reason === 'inactivity' ? '⚠️ 65分間動きがありません' : '⚠️ 転倒の可能性を検知しました';
+  document.getElementById('alertTitle').textContent = '⚠️ 転倒の可能性を検知しました';
   document.getElementById('alertDesc').textContent = '問題なければ下のボタンを押してください';
   document.getElementById('countdown').style.display = 'block';
   document.getElementById('sentMsg').style.display = 'none';
@@ -944,14 +962,13 @@ function triggerAlert(isTest, reason) {
     document.getElementById('countdown').textContent = remaining;
     if (remaining <= 0) {
       clearInterval(countdownTimer);
-      sendAlertEmail(isTest, false, reason);
+      sendAlertEmail(isTest);
     }
   }, 1000);
 }
 
 function cancelAlert() {
   alertActive = false;
-  lastMovementAt = Date.now();
   clearInterval(countdownTimer);
   stopAlarmSound();
   stopAlarmVibrate();
@@ -988,7 +1005,7 @@ async function testAlert() {
 }
 
 // ---- メール送信 ----
-async function sendAlertEmail(isTest, isManual, reason) {
+async function sendAlertEmail(isTest, isManual) {
   const s = JSON.parse(localStorage.getItem('fallDetectSettings') || '{}');
   stopAlarmSound();
   stopAlarmVibrate();
@@ -1011,8 +1028,6 @@ async function sendAlertEmail(isTest, isManual, reason) {
     messageText = `これはテスト通知です。実際の転倒ではありません。（作業者: ${workerName}）`;
   } else if (isManual) {
     messageText = `作業者「${workerName}」が緊急通知ボタンを押しました。至急確認・対応をお願いします。`;
-  } else if (reason === 'inactivity') {
-    messageText = `作業者「${workerName}」の端末が65分間まったく動いておらず、本人からの応答もありませんでした。至急確認をお願いします。`;
   } else {
     messageText = `作業者「${workerName}」について、一人作業見守りアプリが転倒の可能性を検知し、本人からの応答がありませんでした。至急確認をお願いします。`;
   }
