@@ -213,6 +213,19 @@
     font-family: "JetBrains Mono", monospace; font-size: 11px;
   }
 
+  /* 待機画面（黒画面） */
+  #standbyOverlay {
+    display: none; position: fixed; inset: 0; background: #000; z-index: 990;
+    flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  #standbyOverlay.show { display: flex; }
+  .standby-hint { font-size: 14px; line-height: 1.9; color: #6b6b6b; opacity: 0; transition: opacity 0.4s; }
+  .standby-hint.visible { opacity: 1; }
+  .standby-bar { width: 160px; height: 4px; background: #222; margin-top: 18px; opacity: 0; }
+  .standby-bar.visible { opacity: 1; }
+  .standby-bar i { display: block; height: 100%; width: 0; background: var(--signal); }
+
   /* 警告画面 */
   #alertOverlay {
     display: none;
@@ -304,6 +317,7 @@
     <div class="status-text" id="statusText">停止中</div>
     <div class="status-sub" id="statusSub">「監視開始」を押してください</div>
     <button class="big-btn btn-start" id="toggleBtn" onclick="toggleMonitoring()">監視開始</button>
+    <button class="big-btn btn-secondary" id="standbyBtn" onclick="enterStandby()" style="display:none;">🌙 待機画面（黒画面）にする</button>
     <button class="big-btn btn-secondary" onclick="requestPermissions()">① センサー・位置情報の許可</button>
     <button class="big-btn btn-secondary" onclick="testAlert()">テスト通知（実際にメール送信）</button>
     <div class="hint" style="text-align:left;margin-top:12px;">「監視開始」を押している間は、画面が自動で暗くなる（ロックされる）のを防ぎます（対応端末のみ）。ただし、他のアプリに切り替えたり、Safariごとバックグラウンドにすると検知は止まりますので、監視中はこの画面を開いたままにしてください。</div>
@@ -434,6 +448,11 @@
       <button class="btn-start" style="color:#fff;" onclick="checkAdminPassword()">開く</button>
     </div>
   </div>
+</div>
+
+<div id="standbyOverlay">
+  <div class="standby-hint" id="standbyHint">監視中です<br>画面を2秒間長押しすると解除します</div>
+  <div class="standby-bar" id="standbyBar"><i id="standbyBarFill"></i></div>
 </div>
 
 <div id="alertOverlay">
@@ -832,6 +851,7 @@ function startMonitoring() {
   document.getElementById('toggleBtn').textContent = '監視停止';
   document.getElementById('toggleBtn').className = 'big-btn btn-stop';
   log('監視を開始しました');
+  document.getElementById('standbyBtn').style.display = 'block';
 }
 
 function stopMonitoring() {
@@ -847,7 +867,60 @@ function stopMonitoring() {
   document.getElementById('toggleBtn').textContent = '監視開始';
   document.getElementById('toggleBtn').className = 'big-btn btn-start';
   log('監視を停止しました');
+  exitStandby();
+  document.getElementById('standbyBtn').style.display = 'none';
 }
+
+// ---- 待機画面（黒画面）：長押しで解除 ----
+const STANDBY_HOLD_MS = 2000;
+let standbyActive = false, standbyHoldTimer = null, standbyHintTimer = null;
+function showStandbyHint(ms) {
+  document.getElementById('standbyHint').classList.add('visible');
+  clearTimeout(standbyHintTimer);
+  standbyHintTimer = setTimeout(() => document.getElementById('standbyHint').classList.remove('visible'), ms);
+}
+function resetStandbyBar() {
+  const fill = document.getElementById('standbyBarFill');
+  fill.style.transition = 'none';
+  fill.style.width = '0';
+  document.getElementById('standbyBar').classList.remove('visible');
+}
+function enterStandby() {
+  if (!monitoring) { alert('先に「監視開始」を押してください。'); return; }
+  standbyActive = true;
+  document.getElementById('standbyOverlay').classList.add('show');
+  showStandbyHint(5000);
+  log('待機画面（黒画面）に切り替えました');
+}
+function exitStandby() {
+  if (!standbyActive) return;
+  standbyActive = false;
+  clearTimeout(standbyHoldTimer);
+  clearTimeout(standbyHintTimer);
+  resetStandbyBar();
+  document.getElementById('standbyHint').classList.remove('visible');
+  document.getElementById('standbyOverlay').classList.remove('show');
+  log('待機画面を解除しました');
+}
+(function setupStandbyGestures() {
+  const ov = document.getElementById('standbyOverlay');
+  ov.addEventListener('pointerdown', () => {
+    showStandbyHint(3000);
+    const fill = document.getElementById('standbyBarFill');
+    document.getElementById('standbyBar').classList.add('visible');
+    fill.style.transition = 'none';
+    fill.style.width = '0';
+    void fill.offsetWidth;
+    fill.style.transition = `width ${STANDBY_HOLD_MS}ms linear`;
+    fill.style.width = '100%';
+    clearTimeout(standbyHoldTimer);
+    standbyHoldTimer = setTimeout(exitStandby, STANDBY_HOLD_MS);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => {
+    ov.addEventListener(ev, () => { clearTimeout(standbyHoldTimer); resetStandbyBar(); });
+  });
+  ov.addEventListener('contextmenu', e => e.preventDefault());
+})();
 
 // ---- 画面ロック防止（Wake Lock） ----
 // 監視中に画面が自動で暗くなる（ロックされる）のを防ぐ。対応ブラウザのみ有効。
@@ -925,6 +998,7 @@ function stopAlarmVibrate() {
 
 // ---- アラート発動 ----
 function triggerAlert(isTest, reason) {
+  exitStandby();
   alertActive = true;
   document.getElementById('alertOverlay').classList.add('show');
   document.getElementById('alertTitle').textContent = reason === 'inactivity' ? '⚠️ 65分間動きがありません' : '⚠️ 転倒の可能性を検知しました';
